@@ -504,71 +504,86 @@ async function formatarABNT() {
   document.getElementById('abntResult').classList.remove('visible');
   document.getElementById('outputActions').style.display = 'none';
 
-  // Monta prompt
-  const secoes = [];
-  if (campos.capa)          secoes.push(`CAPA:\n${campos.capa}`);
-  if (campos.titulo)        secoes.push(`TÍTULO:\n${campos.titulo}`);
-  if (campos.introducao)    secoes.push(`INTRODUÇÃO:\n${campos.introducao}`);
-  if (campos.desenvolvimento) secoes.push(`DESENVOLVIMENTO:\n${campos.desenvolvimento}`);
-  if (campos.conclusao)     secoes.push(`CONCLUSÃO:\n${campos.conclusao}`);
-  if (campos.referencias)   secoes.push(`REFERÊNCIAS:\n${campos.referencias}`);
 
-  const prompt = `Você é um especialista em normas ABNT brasileiras (NBR 14724, NBR 6022, NBR 6023).
-
-O usuário enviou as seguintes seções de um trabalho acadêmico:
-
-${secoes.join('\n\n')}
-
-Sua tarefa:
-1. Corrija erros de gramática, ortografia e concordância de cada seção
-2. Reformule o texto para seguir as normas ABNT (linguagem formal, impessoal, terceira pessoa)
-3. Formate cada seção conforme as regras da ABNT:
-   - CAPA: centralizada, ordem correta (instituição, autor, título, local, ano)
-   - TÍTULO: em maiúsculas, centralizado, negrito
-   - INTRODUÇÃO: parágrafo com recuo, texto formal
-   - DESENVOLVIMENTO: parágrafos com recuo 1,25cm, texto formal e impessoal
-   - CONCLUSÃO: parágrafo com recuo, síntese objetiva
-   - REFERÊNCIAS: ordem alfabética, formato ABNT (SOBRENOME, Nome. Título. ed. Local: Editora, ano.)
-
-Responda APENAS com um JSON válido, sem texto extra, sem markdown, neste formato exato:
-{
-  "capa": "texto formatado ou null se não foi enviado",
-  "titulo": "texto formatado ou null",
-  "introducao": "texto formatado ou null",
-  "desenvolvimento": "texto formatado ou null",
-  "conclusao": "texto formatado ou null",
-  "referencias": "texto formatado ou null"
-}`;
+    // Simula tempo de processamento para feedback visual
+  await new Promise(r => setTimeout(r, 900));
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4000,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    if (!response.ok) throw new Error(`Erro na API: ${response.status}`);
-
-    const data = await response.json();
-    const raw = data.content.map(b => b.text || '').join('');
-    const clean = raw.replace(/```json|```/g, '').trim();
-    const resultado = JSON.parse(clean);
-
+    const resultado = {
+      capa:           campos.capa          ? formatarCapa(campos.capa)           : null,
+      titulo:         campos.titulo        ? formatarTitulo(campos.titulo)        : null,
+      introducao:     campos.introducao    ? formatarTexto(campos.introducao)     : null,
+      desenvolvimento:campos.desenvolvimento ? formatarTexto(campos.desenvolvimento) : null,
+      conclusao:      campos.conclusao     ? formatarTexto(campos.conclusao)      : null,
+      referencias:    campos.referencias   ? formatarReferencias(campos.referencias) : null,
+    };
     renderizarResultado(resultado, campos);
-
   } catch (err) {
     console.error(err);
-    mostrarErro('Não foi possível conectar à API. Verifique sua conexão e tente novamente.');
+    mostrarErro('Ocorreu um erro ao formatar. Tente novamente.');
     document.getElementById('placeholder').style.display = 'flex';
   } finally {
     btn.classList.remove('loading');
     btn.disabled = false;
     document.getElementById('loadingOverlay').classList.remove('visible');
   }
+}
+
+// ── FORMATADORES ABNT LOCAIS ──
+
+function formatarCapa(texto) {
+  // Garante que cada linha da capa fique separada e limpa
+  return texto.split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0)
+    .join('\n');
+}
+
+function formatarTitulo(texto) {
+  // ABNT: título em maiúsculas, sem pontuação no final
+  return texto.trim()
+    .toUpperCase()
+    .replace(/[.!?]+$/, '');
+}
+
+function formatarTexto(texto) {
+  // Remove cabeçalhos redundantes (ex: "Introdução\n", "Desenvolvimento\n")
+  const cabecalhos = /^(introdução|introduction|desenvolvimento|development|conclusão|conclusion|resumo|abstract)\s*[\n:]/i;
+  let limpo = texto.replace(cabecalhos, '').trim();
+
+  // Divide em parágrafos
+  const paragrafos = limpo.split(/\n{2,}/).map(p => p.replace(/\n/g, ' ').trim()).filter(p => p.length > 0);
+
+  // Aplica regras ABNT a cada parágrafo
+  return paragrafos.map(p => {
+    // Corrige espaço antes de pontuação
+    p = p.replace(/\s+([.,;:!?])/g, '$1');
+    // Garante espaço depois de pontuação
+    p = p.replace(/([.,;:!?])([^\s"'\d])/g, '$1 $2');
+    // Remove espaços duplos
+    p = p.replace(/\s{2,}/g, ' ');
+    // Primeira letra maiúscula
+    p = p.charAt(0).toUpperCase() + p.slice(1);
+    // Garante ponto final
+    if (!/[.!?]$/.test(p)) p += '.';
+    return p;
+  }).join('\n\n');
+}
+
+function formatarReferencias(texto) {
+  // Divide as referências por linha
+  const refs = texto.split('\n').map(r => r.trim()).filter(r => r.length > 0);
+
+  return refs.map(ref => {
+    // Remove ponto final duplo
+    ref = ref.replace(/\.+$/, '') + '.';
+    // Corrige espaços
+    ref = ref.replace(/\s{2,}/g, ' ').trim();
+    return ref;
+  })
+  // Ordena alfabeticamente (padrão ABNT)
+  .sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  .join('\n');
 }
 
 function renderizarResultado(res, campos) {
